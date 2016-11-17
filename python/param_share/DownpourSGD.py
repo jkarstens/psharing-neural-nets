@@ -11,7 +11,7 @@ FLAGS = tf.app.flags.FLAGS
 
 
 
-class DownpourSGD:
+class AsynchSGD:
 
   def __init__(self,parameter_servers,workers ):
     self.parameter_servers=parameter_servers
@@ -24,7 +24,7 @@ class DownpourSGD:
 
 
 
-  def run(self,fetches,dataset,batch_size=1,test_dataset=None,training_epochs=2000, logs_path='/tmp/mnist/1'):
+  def run(self,fetches,dataset,batch_size=1,test_dataset=None,training_epochs=20, logs_path='/tmp/mnist/1'):
 
     if FLAGS.job_name == "ps":
       self.server.join()
@@ -58,6 +58,10 @@ class DownpourSGD:
           sv.start_queue_runners(sess, [chief_queue_runner])
           sess.run(init_token_op)
         '''
+        if test_dataset is not None:
+          test_fetches,fetches=fetches()
+        else:
+          fetches=fetches()
         # create log writer object (this will log on every machine)
         writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
             
@@ -89,14 +93,14 @@ class DownpourSGD:
                     " AvgTime: %3.2fms" % float(elapsed_time*1000/frequency))
               count = 0
         if test_dataset is not None:
-          print("Test-Accuracy: %2.2f" % sess.run(accuracy, feed_dict={x: test_dataset.images, y_: test_dataset.labels}))
+          print("Test-Accuracy: %2.2f" % sess.run(test_fetches, feed_dict={x: test_dataset.images, y_: test_dataset.labels}))
         print("Total Time: %3.2fs" % float(time.time() - begin_time))
         print("Final Cost: %.4f" % cost)
 
       sv.stop()
       print("done")
 
-if __name__=="__main__":
+def main():
   # cluster specification
   parameter_servers = ["pc-01:2222"]
   workers = [ "pc-02:2222", 
@@ -109,6 +113,74 @@ if __name__=="__main__":
   training_epochs = 20
   logs_path = "/tmp/mnist/1"
 
+  #create variables for model
+  def fetches(learning_rate):
+    # input images
+    with tf.name_scope('input'):
+      # None -> batch size can be any size, 784 -> flattened mnist image
+      x = tf.placeholder(tf.float32, shape=[None, 784], name="x-input")
+      # target 10 output classes
+      y_ = tf.placeholder(tf.float32, shape=[None, 10], name="y-input")
+
+    # model parameters will change during training so we use tf.Variable
+    tf.set_random_seed(1)
+    with tf.name_scope("weights"):
+      W1 = tf.Variable(tf.random_normal([784, 100]))
+      W2 = tf.Variable(tf.random_normal([100, 10]))
+
+    # bias
+    with tf.name_scope("biases"):
+      b1 = tf.Variable(tf.zeros([100]))
+      b2 = tf.Variable(tf.zeros([10]))
+
+    # implement model
+    with tf.name_scope("softmax"):
+      # y is our prediction
+      z2 = tf.add(tf.matmul(x,W1),b1)
+      a2 = tf.nn.sigmoid(z2)
+      z3 = tf.add(tf.matmul(a2,W2),b2)
+      y  = tf.nn.softmax(z3)
+
+    # specify cost function
+    with tf.name_scope('cross_entropy'):
+      # this is our cost
+      cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y), reduction_indices=[1]))
+
+    # specify optimizer
+    with tf.name_scope('train'):
+      # optimizer is an "operation" which we can execute in a session
+      grad_op = tf.train.GradientDescentOptimizer(learning_rate)
+      '''
+      rep_op = tf.train.SyncReplicasOptimizer(grad_op, 
+                                          replicas_to_aggregate=len(workers),
+                                          replica_id=FLAGS.task_index, 
+                                          total_num_replicas=len(workers),
+                                          use_locking=True
+                                          )
+      train_op = rep_op.minimize(cross_entropy, global_step=global_step)
+      '''
+      train_op = grad_op.minimize(cross_entropy, global_step=global_step)
+      
+    '''
+    init_token_op = rep_op.get_init_tokens_op()
+    chief_queue_runner = rep_op.get_chief_queue_runner()
+    '''
+
+    with tf.name_scope('Accuracy'):
+      # accuracy
+      correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+      accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+    # create a summary for our cost and accuracy
+    tf.scalar_summary("cost", cross_entropy)
+    tf.scalar_summary("accuracy", accuracy)
+    return [accuracy],[train_op, cross_entropy, summary_op, global_step]
+
   # load mnist data set
   from tensorflow.examples.tutorials.mnist import input_data
-  mnist = input_data.read_data_sets('MNIST_data', one_hot=True).train
+  dataset = input_data.read_data_sets('MNIST_data', one_hot=True).train
+  test_dataset = input_data.read_data_sets('MNIST_data', one_hot=True)
+
+  asgd=AsynchSGD(parameter_servers,workers)
+  asgd.(fetches,dataset,batch_size=batch_size,learning_rate=learning_rate,test_dataset=test_dataset,training_epochs=training_epochs, logs_path=logs_path)
+  
