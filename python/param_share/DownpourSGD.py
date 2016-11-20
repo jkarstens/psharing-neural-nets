@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import tensorflow as tf
+import tf.python.platform import app
 import sys
 import time
 
@@ -24,7 +25,7 @@ class AsynchSGD:
 
 
 
-  def run(self,fetches,dataset,batch_size=1,test_dataset=None,training_epochs=20, logs_path='/tmp/mnist/1'):
+  def run(self,fetches,fetches_format,dataset,batch_size=1,test_dataset=None,learning_rate=0.001,test_fetches_format=None,training_epochs=20, logs_path='/tmp/mnist/1'):
 
     if FLAGS.job_name == "ps":
       self.server.join()
@@ -39,9 +40,10 @@ class AsynchSGD:
         global_step = tf.get_variable('global_step', [], 
                                     initializer = tf.constant_initializer(0), 
                                     trainable = False)
-
-        # merge all summaries into a single "operation" which we can execute in a session 
-        summary_op = tf.merge_all_summaries()
+        if test_dataset is not None:
+          test_fetches,fetches=fetches(learning_rate,global_step)
+        else:
+          fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
         print("Variables initialized ...")
 
@@ -58,12 +60,10 @@ class AsynchSGD:
           sv.start_queue_runners(sess, [chief_queue_runner])
           sess.run(init_token_op)
         '''
-        if test_dataset is not None:
-          test_fetches,fetches=fetches()
-        else:
-          fetches=fetches()
-        # create log writer object (this will log on every machine)
-        writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
+        
+        if 'summary' in fetches_format:
+          # create log writer object (this will log on every machine)
+          writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
             
         # perform training cycles
         start_time = time.time()
@@ -77,20 +77,23 @@ class AsynchSGD:
             batch_x, batch_y = dataset.next_batch(batch_size)
             
             # perform the operations we defined earlier on batch
-            _, cost, summary, step = sess.run(
+            result = sess.run(
                             fetches, 
                             feed_dict={x: batch_x, y_: batch_y})
-            writer.add_summary(summary, step)
+            if 'summary' in fetches_format:
+              writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
             count += 1
             if count % frequency == 0 or i+1 == batch_count:
               elapsed_time = time.time() - start_time
               start_time = time.time()
-              print("Step: %d," % (step+1), 
-                    " Epoch: %2d," % (epoch+1), 
-                    " Batch: %3d of %3d," % (i+1, batch_count), 
-                    " Cost: %.4f," % cost, 
-                    " AvgTime: %3.2fms" % float(elapsed_time*1000/frequency))
+              std_out=''
+              print "Step: %d," % (step+1) 
+              print " Epoch: %2d," % (epoch+1)
+              print " Batch: %3d of %3d," % (i+1, batch_count) 
+              if 'cost' in fetches_format:
+                print " Cost: %.4f," % result[fetches_format['cost']], 
+              print " AvgTime: %3.2fms" % float(elapsed_time*1000/frequency))
               count = 0
         if test_dataset is not None:
           print("Test-Accuracy: %2.2f" % sess.run(test_fetches, feed_dict={x: test_dataset.images, y_: test_dataset.labels}))
@@ -102,10 +105,10 @@ class AsynchSGD:
 
 def main():
   # cluster specification
-  parameter_servers = ["pc-01:2222"]
-  workers = [ "pc-02:2222", 
-        "pc-03:2222",
-        "pc-04:2222"]
+  parameter_servers = ["localhost:2222"]
+  workers = [ "localhost:2223", 
+        "localhost:2224",
+        "localhost:2225"]
 
   # config
   batch_size = 100
@@ -114,7 +117,7 @@ def main():
   logs_path = "/tmp/mnist/1"
 
   #create variables for model
-  def fetches(learning_rate):
+  def fetches(learning_rate, global_step):
     # input images
     with tf.name_scope('input'):
       # None -> batch size can be any size, 784 -> flattened mnist image
@@ -174,13 +177,20 @@ def main():
     # create a summary for our cost and accuracy
     tf.scalar_summary("cost", cross_entropy)
     tf.scalar_summary("accuracy", accuracy)
+    # merge all summaries into a single "operation" which we can execute in a session 
+    summary_op = tf.merge_all_summaries()
     return [accuracy],[train_op, cross_entropy, summary_op, global_step]
 
   # load mnist data set
   from tensorflow.examples.tutorials.mnist import input_data
   dataset = input_data.read_data_sets('MNIST_data', one_hot=True).train
-  test_dataset = input_data.read_data_sets('MNIST_data', one_hot=True)
+  test_dataset = input_data.read_data_sets('MNIST_data', one_hot=True).test
+
+  fetches_format = {'train':0,'cost':1,'summary':2,'step':3}
+  test_fetches_format = {'accuracy':0}
 
   asgd=AsynchSGD(parameter_servers,workers)
-  asgd.(fetches,dataset,batch_size=batch_size,learning_rate=learning_rate,test_dataset=test_dataset,training_epochs=training_epochs, logs_path=logs_path)
+  asgd.run(fetches,fetches_format,dataset,batch_size=batch_size,learning_rate=learning_rate,test_dataset=test_dataset,training_epochs=training_epochs, logs_path=logs_path)
   
+if __name__=="__main__":
+  app.run()
