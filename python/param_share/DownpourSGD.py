@@ -1,7 +1,7 @@
 from __future__ import print_function
 
 import tensorflow as tf
-import tf.python.platform import app
+from tf.python.platform import app
 import sys
 import time
 
@@ -45,7 +45,7 @@ class AsynchSGD:
         else:
           fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
-        print("Variables initialized ...")
+        #print "Variables initialized ..."
 
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
                                 global_step=global_step,
@@ -88,22 +88,23 @@ class AsynchSGD:
               elapsed_time = time.time() - start_time
               start_time = time.time()
               std_out=''
-              print "Step: %d," % (step+1) 
-              print " Epoch: %2d," % (epoch+1)
-              print " Batch: %3d of %3d," % (i+1, batch_count) 
-              if 'cost' in fetches_format:
-                print " Cost: %.4f," % result[fetches_format['cost']], 
-              print " AvgTime: %3.2fms" % float(elapsed_time*1000/frequency))
+              #print "Step: "+str(step+1) 
+              #print " Epoch: " + str(epoch+1)
+              #print " Batch: "+str(i+1)+" of " +str(batch_count) 
+              #if 'cost' in fetches_format:
+              #  print " Cost:" + str(result[fetches_format['cost']]) 
+              #print " AvgTime:" + str(float(elapsed_time*1000/frequency)))
               count = 0
-        if test_dataset is not None:
-          print("Test-Accuracy: %2.2f" % sess.run(test_fetches, feed_dict={x: test_dataset.images, y_: test_dataset.labels}))
-        print("Total Time: %3.2fs" % float(time.time() - begin_time))
-        print("Final Cost: %.4f" % cost)
+        #if test_dataset is not None:
+         # print "Test-Accuracy: "+str(sess.run(test_fetches, feed_dict={x: test_dataset.images, y_: test_dataset.labels}))
+        print "Total Time: " + str(float(time.time() - begin_time))
+        #if 'cost' in fetches_format:
+          print "Final Cost: " + str(cost)
 
       sv.stop()
-      print("done")
+      print "done"
 
-def main():
+def main(argv=None):
   # cluster specification
   parameter_servers = ["localhost:2222"]
   workers = [ "localhost:2223", 
