@@ -33,17 +33,14 @@ class AsynchSGD:
 
       # Between-graph replication
       with tf.device(tf.train.replica_device_setter(
-        worker_device="/job:worker/task:%d" % FLAGS.task_index,
+        worker_device="/job:worker/task:%d/cpu:0" % (FLAGS.task_index),#FLAGS.task_index),
         cluster=self.cluster)):
 
         # count the number of updates
         global_step = tf.get_variable('global_step', [], 
                                     initializer = tf.constant_initializer(0), 
                                     trainable = False)
-        if test_dataset is not None:
-          test_fetches,fetches=fetches(learning_rate,global_step)
-        else:
-          fetches=fetches(learning_rate,global_step)
+        inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
 
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
@@ -72,13 +69,13 @@ class AsynchSGD:
           batch_count = int(dataset.num_examples/batch_size)
 
           count = 0
+          print(str(epoch))
           for i in range(batch_count):
             batch_x, batch_y = dataset.next_batch(batch_size)
-            
             # perform the operations we defined earlier on batch
             result = sess.run(
                             fetches, 
-                            feed_dict={x: batch_x, y_: batch_y})
+                            feed_dict={inputs[0]: batch_x, inputs[1]: batch_y})
             if 'summary' in fetches_format:
               writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
@@ -101,7 +98,7 @@ def main(argv=None):
   # config
   batch_size = 100
   learning_rate = 0.001
-  training_epochs = 20
+  training_epochs = 3
   logs_path = "/tmp/mnist/1"
 
   #create variables for model
@@ -167,7 +164,7 @@ def main(argv=None):
     tf.scalar_summary("accuracy", accuracy)
     # merge all summaries into a single "operation" which we can execute in a session 
     summary_op = tf.merge_all_summaries()
-    return [accuracy],[train_op, cross_entropy, summary_op, global_step]
+    return [x,y_],[train_op, cross_entropy, summary_op, global_step, accuracy]
 
   # load mnist data set
   from tensorflow.examples.tutorials.mnist import input_data
