@@ -80,8 +80,9 @@ class AsynchSGD:
         if FLAGS.task_index==0:
           print("initializing data queue")
           # self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
-          tf.train.start_queue_runners(sess=sess)
-          self.datarunner.start_threads(sess,dataset,batch_size)
+          # tf.train.start_queue_runners(sess=sess)
+          sv.start_queue_runners(sess,[self.datarunner.get_queue_runner])
+          # self.datarunner.start_threads(sess,dataset,batch_size)
           print('data queue initialized')
         # perform training cycles
         start_time = time.time()
@@ -162,7 +163,11 @@ class DataRunner(object):
     """
     Return's tensors containing a batch of images and labels
     """
-    return self.queue.dequeue_many(batch_size)
+    self.dequeue_op=self.queue.dequeue_many(batch_size)
+    return self.dequeue_op
+  def get_queue_runner(self):
+   self.queue_runner=tf.train.QueueRunner(self.queue,self.enqueue_op)
+   return self.queue_runner
 
   def thread_main(self, sess,dataset,batch_size):
     """
