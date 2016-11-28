@@ -101,10 +101,10 @@ class AsynchSGD:
 def main(argv=None):
   # cluster specification
   parameter_servers = ["localhost:2222"]
-  workers = [ "localhost:2223", 
-        "localhost:2224",
-        "localhost:2226",
-        "localhost:2225"]
+  workers = [ "localhost:2223"]#, 
+        #"localhost:2224",
+        #"localhost:2226",
+        #"localhost:2225"]
 
   # config
   batch_size = 100
