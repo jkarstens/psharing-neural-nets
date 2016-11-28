@@ -169,7 +169,11 @@ class DataRunner(object):
     """
     Return's tensors containing a batch of images and labels
     """
-    return self.queue.dequeue_many(batch_size)
+    self.dequeue_op=self.queue.dequeue_many(batch_size)
+    return self.dequeue_op
+  def get_queue_runner(self):
+   self.queue_runner=tf.train.QueueRunner(self.queue,self.enqueue_op)
+   return self.queue_runner
 
   def thread_main(self, sess,dataset,batch_size):
     """
