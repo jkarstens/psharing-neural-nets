@@ -7,6 +7,7 @@ import time
 
 # input flags
 tf.app.flags.DEFINE_string("job_name", "", "Either 'ps' or 'worker'")
+tf.app.flags.DEFINE_integer("frequency",10,"frequency of pushing gradients")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
 FLAGS = tf.app.flags.FLAGS
 
@@ -40,8 +41,18 @@ class AsynchSGD:
         global_step = tf.get_variable('global_step', [], 
                                     initializer = tf.constant_initializer(0), 
                                     trainable = False)
-        inputs,fetches=fetches(learning_rate,global_step)
+        self.inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
+        capacity=max(FLAGS.frequency,2)*len(self.workers)
+        min_after_dequeue=2*len(self.workers)
+        dtypes=[tf.float32,tf.float32]
+        shared_name='train_queue'
+        shared_test_name='test_queue'
+        train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shared_name=shared_name)
+        if FLAGS.task_index==0:
+          train_enqueue_op=train_queue.enqueue_many(inputs)
+        train_dequeue_op=train_queue.dequeue()
+
         print("Initialized Vars")
 
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
@@ -63,6 +74,10 @@ class AsynchSGD:
           # create log writer object (this will log on every machine)
           writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
             
+        if FLAGS.task_index==0:
+          print("initializing data queue")
+          self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
+
         # perform training cycles
         start_time = time.time()
         count = 0
@@ -73,9 +88,12 @@ class AsynchSGD:
 
           print(str(epoch))
           for i in range(batch_count):
-            batch_x, batch_y = dataset.next_batch(batch_size)
+            if FLAGS.task_index==0:
+              self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
+            batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
+            #batch_x, batch_y = dataset.next_batch(batch_size)
             # perform the operations we defined earlier on batch
-            result = sess.run(
+                        result = sess.run(
                             fetches, 
                             feed_dict={inputs[0]: batch_x, inputs[1]: batch_y})
             if 'summary' in fetches_format:
@@ -89,7 +107,7 @@ class AsynchSGD:
               print_str+="Time: "+ str(elapsed_time)+', '
               print_str+="Batch: "+str(batch_count)+', '
               if 'cost' in fetches_format:
-		print_str+="Cost: "+str(result[fetches_format['cost']])+", " 
+		            print_str+="Cost: "+str(result[fetches_format['cost']])+", " 
               print (print_str)
 
           if 'accuracy' in fetches_format:
@@ -97,6 +115,14 @@ class AsynchSGD:
 
         print ("Total Time: " +str(time.time()-begin_time))
       sv.stop()
+  def enqueue_many(self,sess,queue,batch_size,num_enqueue, dataset):
+    batch_x,batch_y=dataset.next_batch(batch_size*num_enqueue)
+    batch_x=batch_x.reshape([num_enqueue,batch_size]+batch_x.shape[1:])
+    batch_y=batch_y.reshape([num_enqueue,batch_size]+batch_y.shape[1:])
+    feed_dict={self.inputs[0]:batch_x,self.inputs[1],batch_y}
+    sess.run(queue,feed_dict=feed_dict)
+  def dequeue(self,sess,dequeue):
+    return sess.run(dequeue)
 
 def main(argv=None):
   # cluster specification
