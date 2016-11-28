@@ -48,10 +48,11 @@ class AsynchSGD:
         dtypes=[tf.float32,tf.float32]
         shared_name='train_queue'
         shared_test_name='test_queue'
-        train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shared_name=shared_name)
+        shapes=[[28*28], [10]]      
+        train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shapes=shapes,shared_name=shared_name)
         if FLAGS.task_index==0:
-          train_enqueue_op=train_queue.enqueue_many(inputs)
-        train_dequeue_op=train_queue.dequeue()
+          train_enqueue_op=train_queue.enqueue_many(self.inputs)
+        train_dequeue_op=train_queue.dequeue_many(batch_size)
 
         print("Initialized Vars")
 
@@ -77,7 +78,7 @@ class AsynchSGD:
         if FLAGS.task_index==0:
           print("initializing data queue")
           self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
-
+          print('data queue initialized')
         # perform training cycles
         start_time = time.time()
         count = 0
@@ -93,7 +94,7 @@ class AsynchSGD:
             batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
             #batch_x, batch_y = dataset.next_batch(batch_size)
             # perform the operations we defined earlier on batch
-                        result = sess.run(
+            result = sess.run(
                             fetches, 
                             feed_dict={inputs[0]: batch_x, inputs[1]: batch_y})
             if 'summary' in fetches_format:
@@ -117,26 +118,29 @@ class AsynchSGD:
       sv.stop()
   def enqueue_many(self,sess,queue,batch_size,num_enqueue, dataset):
     batch_x,batch_y=dataset.next_batch(batch_size*num_enqueue)
-    batch_x=batch_x.reshape([num_enqueue,batch_size]+batch_x.shape[1:])
-    batch_y=batch_y.reshape([num_enqueue,batch_size]+batch_y.shape[1:])
-    feed_dict={self.inputs[0]:batch_x,self.inputs[1],batch_y}
+    #batch_x=batch_x.reshape([num_enqueue,batch_size]+list(batch_x.shape[1:]))
+    #batch_x=[x for x in batch_x.reshape([num_enqueue,batch_size]+list(batch_x.shape[1:]))]
+    #batch_y=batch_y.reshape([num_enqueue,batch_size]+list(batch_y.shape[1:]))
+    #batch_y=[y for y in batch_y.reshape([num_enqueue,batch_size]+list(batch_y.shape[1:]))]
+    #for i,x in enumerate(batch_x):
+    #   sess.run(queue,{self.inputs[0]:x,self.inputs[1]:batch_y[i]})
+    feed_dict={self.inputs[0]:batch_x,self.inputs[1]:batch_y}
     sess.run(queue,feed_dict=feed_dict)
   def dequeue(self,sess,dequeue):
     return sess.run(dequeue)
 
 def main(argv=None):
   # cluster specification
-  parameter_servers = ["localhost:2222"]
-  workers = [ "localhost:2223", 
-        "localhost:2224",
-        "localhost:2226",
-        "localhost:2225"]
+  parameter_servers = ["localhost:4222"]
+  workers = [ "localhost:4223", 
+        "localhost:4224",
+        "localhost:4225"]
 
   # config
   batch_size = 100
   learning_rate = 0.001
   training_epochs = 3
-  logs_path = "/tmp/mnist/1"
+  logs_path = "/rscratch/cs194/psharing-neural-nets/asynch-logging/"
 
   #create variables for model
   def fetches(learning_rate, global_step):
