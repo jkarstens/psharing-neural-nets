@@ -44,8 +44,8 @@ class AsynchSGD:
                                     trainable = False)
         self.inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
-        capacity=max(FLAGS.frequency,2)*len(self.workers)
-        min_after_dequeue=len(self.workers)
+        capacity=max(FLAGS.frequency,2)*len(self.workers)*batch_size
+        min_after_dequeue=len(self.workers)*batch_size
         dtypes=[tf.float32,tf.float32]
         shared_name='train_queue'
         shared_test_name='test_queue'
@@ -55,6 +55,7 @@ class AsynchSGD:
         #   train_enqueue_op=train_queue.enqueue_many(self.inputs)
         # train_dequeue_op=train_queue.dequeue_many(batch_size)
         self.datarunner=DataRunner(self.inputs,capacity,min_after_dequeue,dtypes,shapes,shared_name)
+        train_dequeue_op=self.datarunner.get_inputs(batch_size)
         print("Initialized Vars")
 
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
@@ -94,13 +95,13 @@ class AsynchSGD:
           for i in range(batch_count):
             # if FLAGS.task_index==0:
             #   self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
-            batch_x,batch_y=self.datarunner.get_inputs(batch_size)
-            # batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
+            #batch_x,batch_y=self.datarunner.get_inputs(batch_size)
+            batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
             #batch_x, batch_y = dataset.next_batch(batch_size)
             # perform the operations we defined earlier on batch
             result = sess.run(
                             fetches, 
-                            feed_dict={inputs[0]: batch_x, inputs[1]: batch_y})
+                            feed_dict={self.inputs[0]: batch_x, self.inputs[1]: batch_y})
             if 'summary' in fetches_format:
               writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
@@ -108,9 +109,9 @@ class AsynchSGD:
             if count % frequency == 0 or i+1 == batch_count:
               elapsed_time = time.time() - start_time
               start_time = time.time()
-              print_str=''
+              print_str=str(FLAGS.task_index)+': '
               print_str+="Time: "+ str(elapsed_time)+', '
-              print_str+="Batch: "+str(batch_count)+', '
+              print_str+="Batch: "+str(count)+', '
               if 'cost' in fetches_format:
 		            print_str+="Cost: "+str(result[fetches_format['cost']])+", " 
               print (print_str)
@@ -151,7 +152,11 @@ class DataRunner(object):
                                        min_after_dequeue=min_after_dequeue,
                                        shared_name=shared_name)
 
-
+    # The symbolic operation to add data to the queue
+    # we could do some preprocessing here or do it in numpy. In this example
+    # we do the scaling in numpy
+    if FLAGS.task_index==0:
+      self.enqueue_op = self.queue.enqueue_many(self.inputs) 
 
   def get_inputs(self,batch_size):
     """
@@ -163,15 +168,17 @@ class DataRunner(object):
     """
     Function run on alternate thread. Basically, keep adding data to the queue.
     """
-    for dataX, dataY in self.data_iterator(dataset,batch_size):
+    for data in self.data_iterator(dataset,batch_size):
+      dataX=data[0]
+      if len(dataX.shape)<=1:
+        dataX=dataX.reshape([1,dataX.shape[0]])
+      dataY=data[1]
+      if len(dataY.shape)<=1:
+        dataY=dataY.reshape([1,dataY.shape[0]])
       sess.run(self.enqueue_op, feed_dict={self.inputs[0]:dataX, self.inputs[1]:dataY})
 
   def start_threads(self, sess,dataset,batch_size, n_threads=1):
     """ Start background threads to feed queue """
-    # The symbolic operation to add data to the queue
-    # we could do some preprocessing here or do it in numpy. In this example
-    # we do the scaling in numpy
-    self.enqueue_op = self.queue.enqueue_many(self.inputs)
     threads = []
     for n in range(n_threads):
       t = threading.Thread(target=self.thread_main, args=(sess,dataset,batch_size))
@@ -180,8 +187,9 @@ class DataRunner(object):
       threads.append(t)
     return threads
   def data_iterator(self,dataset,batch_size):
-    return dataset.next_batch(batch_size)
-
+    while True:
+      batch_x,batch_y= dataset.next_batch(batch_size)
+      yield batch_x,batch_y
 def main(argv=None):
   # cluster specification
   parameter_servers = ["localhost:4222"]
