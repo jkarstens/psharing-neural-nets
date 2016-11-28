@@ -4,6 +4,7 @@ import tensorflow as tf
 from tensorflow.python.platform import app
 import sys
 import time
+import threading
 
 # input flags
 tf.app.flags.DEFINE_string("job_name", "", "Either 'ps' or 'worker'")
@@ -44,16 +45,16 @@ class AsynchSGD:
         self.inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
         capacity=max(FLAGS.frequency,2)*len(self.workers)
-        min_after_dequeue=2*len(self.workers)
+        min_after_dequeue=len(self.workers)
         dtypes=[tf.float32,tf.float32]
         shared_name='train_queue'
         shared_test_name='test_queue'
         shapes=[[28*28], [10]]      
-        train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shapes=shapes,shared_name=shared_name)
-        if FLAGS.task_index==0:
-          train_enqueue_op=train_queue.enqueue_many(self.inputs)
-        train_dequeue_op=train_queue.dequeue_many(batch_size)
-
+        # train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shapes=shapes,shared_name=shared_name)
+        # if FLAGS.task_index==0:
+        #   train_enqueue_op=train_queue.enqueue_many(self.inputs)
+        # train_dequeue_op=train_queue.dequeue_many(batch_size)
+        self.datarunner=DataRunner(self.inputs,capacity,min_after_dequeue,dtypes,shapes,shared_name)
         print("Initialized Vars")
 
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
@@ -77,7 +78,8 @@ class AsynchSGD:
             
         if FLAGS.task_index==0:
           print("initializing data queue")
-          self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
+          # self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
+          self.datarunner.start_threads(sess,dataset,batch_size)
           print('data queue initialized')
         # perform training cycles
         start_time = time.time()
@@ -89,9 +91,10 @@ class AsynchSGD:
 
           print(str(epoch))
           for i in range(batch_count):
-            if FLAGS.task_index==0:
-              self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
-            batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
+            # if FLAGS.task_index==0:
+            #   self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
+            batch_x,batch_y=self.datarunner.get_inputs(batch_size)
+            # batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
             #batch_x, batch_y = dataset.next_batch(batch_size)
             # perform the operations we defined earlier on batch
             result = sess.run(
@@ -128,6 +131,53 @@ class AsynchSGD:
     sess.run(queue,feed_dict=feed_dict)
   def dequeue(self,sess,dequeue):
     return sess.run(dequeue)
+
+
+class DataRunner(object):
+  """
+  This class manages the the background threads needed to fill
+      a queue full of data.
+  """
+  def __init__(self,inputs,capacity,min_after_dequeue,dtypes,shapes,shared_name):
+    self.inputs=inputs
+    # The actual queue of data. The queue contains a vector for
+    # the mnist features, and a scalar label.
+    self.queue = tf.RandomShuffleQueue(shapes=shapes,
+                                       dtypes=dtypes,
+                                       capacity=capacity,
+                                       min_after_dequeue=min_after_dequeue,
+                                       shared_name=shared_name)
+
+
+
+  def get_inputs(self,batch_size):
+    """
+    Return's tensors containing a batch of images and labels
+    """
+    return self.queue.dequeue_many(batch_size)
+
+  def thread_main(self, sess,dataset,batch_size):
+    """
+    Function run on alternate thread. Basically, keep adding data to the queue.
+    """
+    for dataX, dataY in self.data_iterator(dataset,batch_size):
+      sess.run(self.enqueue_op, feed_dict={self.inputs[0]:dataX, self.inputs[1]:dataY})
+
+  def start_threads(self, sess,dataset,batch_size, n_threads=1):
+    """ Start background threads to feed queue """
+    # The symbolic operation to add data to the queue
+    # we could do some preprocessing here or do it in numpy. In this example
+    # we do the scaling in numpy
+    self.enqueue_op = self.queue.enqueue_many(self.inputs)
+    threads = []
+    for n in range(n_threads):
+      t = threading.Thread(target=self.thread_main, args=(sess,dataset,batch_size))
+      t.daemon = True # thread will close when parent quits
+      t.start()
+      threads.append(t)
+    return threads
+  def data_iterator(self,dataset,batch_size):
+    return dataset.next_batch(batch_size)
 
 def main(argv=None):
   # cluster specification
@@ -208,9 +258,12 @@ def main(argv=None):
     return [x,y_],[train_op, cross_entropy, summary_op, global_step, accuracy]
 
   # load mnist data set
+  dataset=None
+  test_dataset=None
   from tensorflow.examples.tutorials.mnist import input_data
-  dataset = input_data.read_data_sets('MNIST_data', one_hot=True).train
-  test_dataset = input_data.read_data_sets('MNIST_data', one_hot=True).test
+  if FLAGS.job_name=='worker' and FLAGS.task_index==0:
+    dataset = input_data.read_data_sets('MNIST_data', one_hot=True).train
+    test_dataset = input_data.read_data_sets('MNIST_data', one_hot=True).test
 
   fetches_format = {'train':0,'cost':1,'summary':2,'step':3}
   test_fetches_format = {'accuracy':0}
