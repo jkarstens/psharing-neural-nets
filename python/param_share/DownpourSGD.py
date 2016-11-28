@@ -34,6 +34,16 @@ class AsynchSGD:
     elif FLAGS.job_name == "worker":
 
       # Between-graph replication
+      with tf.container("in_queue"):
+      #with tf.device(tf.train.replica_device_setter(
+      #  worker_device="/job:worker/task:0/cpu:0",cluster=self.cluster)):
+        capacity=max(FLAGS.frequency,2)*len(self.workers)*batch_size
+        min_after_dequeue=len(self.workers)*batch_size
+        dtypes=[tf.float32,tf.float32]
+        shared_name='train_queue'
+        shapes=[[28*28], [10]]      
+        self.datarunner=DataRunner([],capacity,min_after_dequeue,dtypes,shapes,shared_name)
+        train_dequeue_op=self.datarunner.get_inputs(batch_size)
       with tf.device(tf.train.replica_device_setter(
         worker_device="/job:worker/task:%d/cpu:0" % (FLAGS.task_index),#FLAGS.task_index),
         cluster=self.cluster)):
@@ -44,18 +54,11 @@ class AsynchSGD:
                                     trainable = False)
         self.inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
-        capacity=max(FLAGS.frequency,2)*len(self.workers)*batch_size
-        min_after_dequeue=len(self.workers)*batch_size
-        dtypes=[tf.float32,tf.float32]
-        shared_name='train_queue'
         shared_test_name='test_queue'
-        shapes=[[28*28], [10]]      
         # train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shapes=shapes,shared_name=shared_name)
         # if FLAGS.task_index==0:
         #   train_enqueue_op=train_queue.enqueue_many(self.inputs)
         # train_dequeue_op=train_queue.dequeue_many(batch_size)
-        self.datarunner=DataRunner(self.inputs,capacity,min_after_dequeue,dtypes,shapes,shared_name)
-        train_dequeue_op=self.datarunner.get_inputs(batch_size)
         print("Initialized Vars")
 
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
@@ -65,7 +68,9 @@ class AsynchSGD:
 
       begin_time = time.time()
       frequency = 100
-      with sv.prepare_or_wait_for_session(self.server.target) as sess:
+      cfg = tf.ConfigProto(log_device_placement=True)
+      #cfg = tf.ConfigProto(allow_soft_placement=True,log_device_placement=True)
+      with sv.prepare_or_wait_for_session(self.server.target,config=cfg) as sess:
         '''
         # is chief
         if FLAGS.task_index == 0:
@@ -76,16 +81,17 @@ class AsynchSGD:
         if 'summary' in fetches_format:
           # create log writer object (this will log on every machine)
           writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
-            
+        print(str(FLAGS.task_index)+"before queue runner")            
+        tf.train.start_queue_runners(sess=sess)
         if FLAGS.task_index==0:
           print("initializing data queue")
           # self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
-          tf.train.start_queue_runners(sess=sess)
           self.datarunner.start_threads(sess,dataset,batch_size)
           print('data queue initialized')
         # perform training cycles
         start_time = time.time()
         count = 0
+        print(str(FLAGS.task_index)+"after queue runner")
         for epoch in range(training_epochs):
 
           # number of batches in one epoch
@@ -96,14 +102,15 @@ class AsynchSGD:
             # if FLAGS.task_index==0:
             #   self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
             #batch_x,batch_y=self.datarunner.get_inputs(batch_size)
+            print(str(FLAGS.task_index)+"before dequeue")
             batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
             #batch_x, batch_y = dataset.next_batch(batch_size)
             # perform the operations we defined earlier on batch
             result = sess.run(
                             fetches, 
                             feed_dict={self.inputs[0]: batch_x, self.inputs[1]: batch_y})
-            if 'summary' in fetches_format:
-              writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
+            #if 'summary' in fetches_format:
+             # writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
             count += 1
             if count % frequency == 0 or i+1 == batch_count:
@@ -182,7 +189,7 @@ class DataRunner(object):
     threads = []
     for n in range(n_threads):
       t = threading.Thread(target=self.thread_main, args=(sess,dataset,batch_size))
-      t.daemon = True # thread will close when parent quits
+      t.daemon = False # thread will close when parent quits
       t.start()
       threads.append(t)
     return threads
@@ -200,7 +207,7 @@ def main(argv=None):
   # config
   batch_size = 100
   learning_rate = 0.001
-  training_epochs = 3
+  training_epochs =100 
   logs_path = "/rscratch/cs194/psharing-neural-nets/asynch-logging/"
 
   #create variables for model
@@ -262,10 +269,11 @@ def main(argv=None):
       accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
     # create a summary for our cost and accuracy
-    tf.scalar_summary("cost", cross_entropy)
-    tf.scalar_summary("accuracy", accuracy)
+    #tf.scalar_summary("cost", cross_entropy)
+    #tf.scalar_summary("accuracy", accuracy)
     # merge all summaries into a single "operation" which we can execute in a session 
-    summary_op = tf.merge_all_summaries()
+    #summary_op = tf.merge_all_summaries()
+    summary_op=None
     return [x,y_],[train_op, cross_entropy, summary_op, global_step, accuracy]
 
   # load mnist data set
