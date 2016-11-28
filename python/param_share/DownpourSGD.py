@@ -27,7 +27,7 @@ class AsynchSGD:
 
 
 
-  def run(self,fetches,fetches_format,dataset,batch_size=1,test_dataset=None,learning_rate=0.001,test_fetches=None,test_fetches_format=None,training_epochs=20, logs_path='/tmp/mnist/1'):
+  def run(self,fetches,fetches_format,dataset,batch_size=1,epoch_size=1000,test_dataset=None,learning_rate=0.001,test_fetches=None,test_fetches_format=None,training_epochs=20, logs_path='/tmp/mnist/1'):
 
     if FLAGS.job_name == "ps":
       self.server.join()
@@ -79,6 +79,7 @@ class AsynchSGD:
         if FLAGS.task_index==0:
           print("initializing data queue")
           # self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
+          tf.train.start_queue_runners(sess=sess)
           self.datarunner.start_threads(sess,dataset,batch_size)
           print('data queue initialized')
         # perform training cycles
@@ -87,7 +88,7 @@ class AsynchSGD:
         for epoch in range(training_epochs):
 
           # number of batches in one epoch
-          batch_count = int(dataset.num_examples/batch_size)
+          batch_count = int(epoch_size/batch_size)
 
           print(str(epoch))
           for i in range(batch_count):
@@ -139,7 +140,9 @@ class DataRunner(object):
       a queue full of data.
   """
   def __init__(self,inputs,capacity,min_after_dequeue,dtypes,shapes,shared_name):
-    self.inputs=inputs
+    self.inputs=[]
+    for shape in shapes:
+      self.inputs.append(tf.placeholder(dtype=tf.float32,shape=[None]+shape))
     # The actual queue of data. The queue contains a vector for
     # the mnist features, and a scalar label.
     self.queue = tf.RandomShuffleQueue(shapes=shapes,
@@ -269,7 +272,7 @@ def main(argv=None):
   test_fetches_format = {'accuracy':0}
 
   asgd=AsynchSGD(parameter_servers,workers)
-  asgd.run(fetches,fetches_format,dataset,batch_size=batch_size,learning_rate=learning_rate,test_dataset=test_dataset,training_epochs=training_epochs, logs_path=logs_path)
+  asgd.run(fetches,fetches_format,dataset,batch_size=batch_size,epoch_size=1000,learning_rate=learning_rate,test_dataset=test_dataset,training_epochs=training_epochs, logs_path=logs_path)
   
 if __name__=="__main__":
   app.run()
