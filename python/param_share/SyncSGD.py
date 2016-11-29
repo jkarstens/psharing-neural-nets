@@ -36,27 +36,37 @@ class SynchSGD:
         worker_device="/job:worker/task:%d/cpu:0" % (FLAGS.task_index),#FLAGS.task_index),
         cluster=self.cluster)):
 
+        print(str(FLAGS.task_index),"b4 gloabl step")
         # count the number of updates
         global_step = tf.get_variable('global_step', [],
                                     initializer = tf.constant_initializer(0),
                                     trainable = False)
+        print(str(FLAGS.task_index),"b4 fetches")
         inputs,fetches=fetches(learning_rate,global_step)
         if FLAGS.task_index == 0:
             chief_queue_runner = fetches[-1]
             init_token_op = fetches[-2]
         init_op = tf.initialize_all_variables()
 
+      print(str(FLAGS.task_index),"b4 sv")
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
                                 global_step=global_step,
-                                init_op=init_op)
+                                init_op=init_op,
+                                logdir=logs_path)
 
       begin_time = time.time()
       frequency = 100
+      print(str(FLAGS.task_index),"b4 sesh")
       with sv.prepare_or_wait_for_session(self.server.target) as sess:
-        # is chief
+             # is chief
+        print(str(FLAGS.task_index),"b4 qr")
+        queue_runners = tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS)
+        sv.start_queue_runners(sess, queue_runners)
+        print(str(FLAGS.task_index)," after qr")
         if FLAGS.task_index == 0:
           sv.start_queue_runners(sess, [chief_queue_runner])
           sess.run(init_token_op)
+        print(str(FLAGS.task_index)," after cqr")
 
 
         if 'summary' in fetches_format:
@@ -71,13 +81,14 @@ class SynchSGD:
           batch_count = int(dataset.num_examples/batch_size)
 
           count = 0
-          print(str(epoch))
+          print(str(FLAGS.task_index),str(epoch))
           for i in range(batch_count):
             batch_x, batch_y = dataset.next_batch(batch_size)
             # perform the operations we defined earlier on batch
             result = sess.run(
                             fetches[:-2],
                             feed_dict={inputs[0]: batch_x, inputs[1]: batch_y})
+            print(str(FLAGS.task_index),str(i))
             if 'summary' in fetches_format:
               writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
@@ -88,7 +99,7 @@ class SynchSGD:
               std_out=''
               count = 0
 
-      sv.stop()
+      #sv.stop()
 
 def main(argv=None):
   # cluster specification
@@ -101,7 +112,7 @@ def main(argv=None):
   batch_size = 100
   learning_rate = 0.001
   training_epochs = 3
-  logs_path = "/tmp/mnist/1"
+  logs_path = "/rscratch/cs194/psharing-neural-nets/sync-logging"
 
   #create variables for model
   def fetches(learning_rate, global_step):
@@ -140,13 +151,18 @@ def main(argv=None):
     with tf.name_scope('train'):
       # optimizer is an "operation" which we can execute in a session
       grad_op = tf.train.GradientDescentOptimizer(learning_rate)
+      print('len workers %d: '%FLAGS.task_index,str(len(workers)))
       rep_op = tf.train.SyncReplicasOptimizer(grad_op,
                                           replicas_to_aggregate=len(workers),
                                           replica_id=FLAGS.task_index,
                                           total_num_replicas=len(workers),
                                           use_locking=True
                                           )
-      train_op = rep_op.minimize(cross_entropy, global_step=global_step)
+      grads = rep_op.compute_gradients(cross_entropy)
+      apply_gradients_op = rep_op.apply_gradients(grads,global_step=global_step)
+      with tf.control_dependencies([apply_gradients_op]):
+        train_op=tf.identity(cross_entropy,name='train_op')
+      #train_op = rep_op.minimize(cross_entropy, global_step=global_step)
       #train_op = grad_op.minimize(cross_entropy, global_step=global_step)
 
     init_token_op = rep_op.get_init_tokens_op()
