@@ -28,8 +28,8 @@ message DataShardRequest
 
 message DataShardResponse 
 {
-  required string batchx = 2;
-  required string batchy = 3;
+  required bytes batchx = 2;
+  required bytes batchy = 3;
 }
 
 service DataShardService 

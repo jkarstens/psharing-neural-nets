@@ -43,14 +43,14 @@ _DATASHARDRESPONSE = descriptor.Descriptor(
   fields=[
     descriptor.FieldDescriptor(
       name='batchx', full_name='protobuf.socketrpc.DataShardResponse.batchx', index=0,
-      number=2, type=9, cpp_type=9, label=2,
+      number=2, type=12, cpp_type=9, label=2,
       has_default_value=False, default_value=unicode("", "utf-8"),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     descriptor.FieldDescriptor(
       name='batchy', full_name='protobuf.socketrpc.DataShardResponse.batchy', index=0,
-      number=3, type=9, cpp_type=9, label=2,
+      number=3, type=12, cpp_type=9, label=2,
       has_default_value=False, default_value=unicode("", "utf-8"),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
