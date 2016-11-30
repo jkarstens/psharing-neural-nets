@@ -83,8 +83,6 @@ class AsynchSGD:
           sv.start_queue_runners(sess, [chief_queue_runner])
           sess.run(init_token_op)
         '''
-        print('in sv prepare/wait block')
-
         if 'summary' in fetches_format:
           # create log writer object (this will log on every machine)
           writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
@@ -110,15 +108,15 @@ class AsynchSGD:
 
             # Make a synchronous call to the data server
             try:
-                print(str(FLAGS.task_index) + ' Making synchronous call to data server')
+                # print(str(FLAGS.task_index) + ' Making synchronous call to data server')
                 response = self.service.DataService(self.request, timeout=1000)
-                print('got response')
+                # print('got response')
             except Exception, ex:
                 print('exception getting batch from data server')
                 print(ex)
-            batch_x, batch_y = np.fromstring(response.batchx).reshape(-1, 784), np.fromstring(response.batchy).reshape(-1, 10)
-            print('batch_x shape = ' + str(batch_x.shape))
-            print('batch_y shape = ' + str(batch_y.shape))
+            batch_x, batch_y = np.fromstring(response.batchx, dtype=np.float32).reshape(-1, 784), np.fromstring(response.batchy).reshape(-1, 10)
+            # print('batch_x shape = ' + str(batch_x.shape))
+            # print('batch_y shape = ' + str(batch_y.shape))
 
             result = sess.run(
                             fetches,
@@ -153,10 +151,10 @@ class AsynchSGD:
 
 def main(argv=None):
   # cluster specification
-  parameter_servers = ["localhost:3222"]
-  workers = [ "localhost:3223",
-        "localhost:3224",
-        "localhost:3225"]
+  parameter_servers = ["localhost:4222"]
+  workers = [ "localhost:4223",
+        "localhost:4224",
+        "localhost:4225"]
 
   # config
   batch_size = 100
