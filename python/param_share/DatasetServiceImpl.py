@@ -45,8 +45,8 @@ class DataServiceImpl(data_service_pb2.DataShardService):
         batchx,batchy = self.dataset.next_batch(batch_size)
         # Create a reply
         response = data_service_pb2.DataShardResponse()
-        response.batchx = batchx.tobytes()
-        response.batchy = batchy.tobytes()
+        response.batchx = str(batchx.tobytes())
+        response.batchy = str(batchy.tobytes())
 
         # Sleeping to show asynchronous behavior on client end.
         time.sleep(1)
