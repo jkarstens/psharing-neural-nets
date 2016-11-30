@@ -40,7 +40,7 @@ class AsynchSGD:
                          9999,
                          'localhost')
 
-  def run(self,fetches,fetches_format,dataset,batch_size=1,test_dataset=None,learning_rate=0.001,test_fetches=None,test_fetches_format=None,training_epochs=20, logs_path='/tmp/mnist/1'):
+  def run(self,fetches,fetches_format,dataset,batch_size=1,test_dataset=None,learning_rate=0.001,test_fetches=None,test_fetches_format=None,training_epochs=20, logs_path='/rscratch/cs194/psharing-neural-nets/tmp'):
 
     if FLAGS.job_name == "ps":
       self.server.join()
@@ -117,10 +117,12 @@ class AsynchSGD:
                 print('exception getting batch from data server')
                 print(ex)
             batch_x, batch_y = np.fromstring(response.batchx).reshape(-1, 784), np.fromstring(response.batchy).reshape(-1, 10)
+            print('batch_x shape = ' + str(batch_x.shape))
+            print('batch_y shape = ' + str(batch_y.shape))
 
             result = sess.run(
                             fetches,
-                            feed_dict={inputs[0]: batch_x, inputs[1]: batch_y})
+                            feed_dict={self.inputs[0]: batch_x, self.inputs[1]: batch_y})
             if 'summary' in fetches_format:
               writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
@@ -151,17 +153,16 @@ class AsynchSGD:
 
 def main(argv=None):
   # cluster specification
-  parameter_servers = ["localhost:2222"]
-  workers = [ "localhost:2223",
-        "localhost:2224",
-        "localhost:2226",
-        "localhost:2225"]
+  parameter_servers = ["localhost:3222"]
+  workers = [ "localhost:3223",
+        "localhost:3224",
+        "localhost:3225"]
 
   # config
   batch_size = 100
   learning_rate = 0.001
   training_epochs = 3
-  logs_path = "/tmp/mnist/1"
+  logs_path = "/rscratch/cs194/psharing-neural-nets/tmp"
 
   #create variables for model
   def fetches(learning_rate, global_step):
