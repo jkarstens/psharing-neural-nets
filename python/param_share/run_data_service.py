@@ -40,7 +40,7 @@ from tensorflow.examples.tutorials.mnist import input_data
 # *not* the class defined in the proto file.
 dataset = input_data.read_data_sets('MNIST_data', one_hot=True).train
 data_service = impl.DataServiceImpl(dataset)
-server = server.SocketRpcServer(9999)
+server = server.SocketRpcServer(9899)
 server.registerService(data_service)
 
 # Start the server
