@@ -1,6 +1,5 @@
 #!/usr/bin/python
 # Copyright (c) 2009 Las Cumbres Observatory (www.lcogt.net)
-# Copyright (c) 2010 Jan Dittberner
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,30 +18,38 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+
+'''HelloWorldServiceImpl.py - 'Hello world' service implementation example.
+Authors: Eric Saunders (esaunders@lcogt.net)
+         Martin Norbury (mnorbury@lcogt.net)
+         Zach Walker (zwalker@lcogt.net)
+May 2009
 '''
-run_server.py - A simple front-end to demo the RPC server implementation.
-Author: Eric Saunders (esaunders@lcogt.net)
-        Jan Dittberner (jan@dittberner.info)
-May 2009, Nov 2010
-'''
 
-# Add main protobuf module to classpath
-import sys
-sys.path.append('../../protobuf-socket-rpc/python/src/')
-print(sys.path)
-# Import required RPC modules
-import protobuf.socketrpc.server as server
-import DatasetServiceImpl as impl
-from tensorflow.examples.tutorials.mnist import input_data
+import data_service_pb2
+import time
 
-# Create and register the service
-# Note that this is an instantiation of the implementation class,
-# *not* the class defined in the proto file.
-dataset = input_data.read_data_sets('MNIST_data', one_hot=True).train
-data_service = impl.DataServiceImpl(dataset)
-server = server.SocketRpcServer(9999)
-server.registerService(data_service)
 
-# Start the server
-print 'Serving on port 9999'
-server.run()
+class DataServiceImpl(data_service_pb2.DataShardService):
+    def __init__(self,dataset):
+        super(data_service_pb2.DataShardService,self).__init__()
+        self.dataset=dataset
+    def DataService(self, controller, request, done):
+        print "In data server"
+
+        # Print the request
+        print request
+
+        # Extract name from the message received
+        batch_size = int(request.batch_size)
+        batchx,batchy = self.dataset.next_batch(batch_size)
+        # Create a reply
+        response = data_service_pb2.DataShardResponse()
+        response.batchx = batchx.tobytes()
+        response.batchy = batchy.tobytes()
+
+        # Sleeping to show asynchronous behavior on client end.
+        time.sleep(1)
+
+        # We're done, call the run method of the done callback
+        done.run(response)
