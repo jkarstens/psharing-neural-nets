@@ -1,0 +1,3 @@
+[submodule "protobuf-socket-rpc"]
+	path = protobuf-socket-rpc
+	url = https://github.com/sdeo/protobuf-socket-rpc.git
