@@ -28,7 +28,7 @@ May 2009, Nov 2010
 
 # Add main protobuf module to classpath
 import sys
-sys.path.append('../../main')
+sys.path.append('../../protobuf-socket-rpc')
 
 # Import required RPC modules
 import protobuf.socketrpc.server as server

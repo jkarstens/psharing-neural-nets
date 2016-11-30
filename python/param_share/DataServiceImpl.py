@@ -35,7 +35,7 @@ class DataServiceImpl(data_service_pb2.DataShardService):
         super(data_service_pb2.DataShardService,self).__init__()
         self.dataset=dataset
     def DataService(self, controller, request, done):
-        print "In HelloWorld!"
+        print "In data server"
 
         # Print the request
         print request
