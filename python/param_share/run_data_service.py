@@ -44,5 +44,5 @@ server = server.SocketRpcServer(9899)
 server.registerService(data_service)
 
 # Start the server
-print 'Serving on port 9999'
+print 'Serving on port 9899'
 server.run()

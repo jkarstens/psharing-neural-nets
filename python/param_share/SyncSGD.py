@@ -37,36 +37,22 @@ class SynchSGD:
     self.request.batch_size = '10'
     # Create a new service instance
     self.service = RpcService(data_service_pb2.DataShardService_Stub,
-                         8888,
+                         9899,
                          'localhost')
 
   def run(self,fetches,fetches_format,dataset,batch_size=1,test_dataset=None,learning_rate=0.001,test_fetches=None,test_fetches_format=None,training_epochs=20, logs_path='/rscratch/cs194/psharing-neural-nets/tmp'):
-
     if FLAGS.job_name == "ps":
       self.server.join()
     elif FLAGS.job_name == "worker":
-
       # Between-graph replication
       with tf.device(tf.train.replica_device_setter(
-        worker_device="/job:worker/task:%d/cpu:0" % (FLAGS.task_index),#FLAGS.task_index),
-        cluster=self.cluster)):
-
+        worker_device="/job:worker/task:%d/cpu:0" % (FLAGS.task_index), cluster=self.cluster)):
         # count the number of updates
         global_step = tf.get_variable('global_step', [],
                                     initializer = tf.constant_initializer(0),
                                     trainable = False)
         self.inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
-        # capacity=max(FLAGS.frequency,2)*len(self.workers)
-        # min_after_dequeue=2*len(self.workers)
-        # dtypes=[tf.float32,tf.float32]
-        # shared_name='train_queue'
-        # shared_test_name='test_queue'
-        # train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shared_name=shared_name)
-        # # if FLAGS.task_index==0:
-        # #   train_enqueue_op=train_queue.enqueue_many(inputs)
-        # train_dequeue_op=train_queue.dequeue()
-
         print(str(FLAGS.task_index) + " Initialized Vars")
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
                                 global_step=global_step,
@@ -86,36 +72,21 @@ class SynchSGD:
           # create log writer object (this will log on every machine)
           writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
 
-        # if FLAGS.task_index==0:
-        #   print("initializing data queue")
-        #   self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
-
         # perform training cycles
         start_time = time.time()
         count = 0
         for epoch in range(training_epochs):
-
           # number of batches in one epoch
           batch_count = int(dataset.num_examples/batch_size)
-
           print(str(epoch))
           for i in range(batch_count):
-            # if FLAGS.task_index==0:
-            #   self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
-            # batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
-            #batch_x, batch_y = dataset.next_batch(batch_size)
-
             # Make a synchronous call to the data server
             try:
-                # print(str(FLAGS.task_index) + ' Making synchronous call to data server')
                 response = self.service.DataService(self.request, timeout=1000)
-                # print('got response')
             except Exception, ex:
                 print('exception getting batch from data server')
                 print(ex)
             batch_x, batch_y = np.fromstring(response.batchx, dtype=np.float32).reshape(-1, 784), np.fromstring(response.batchy).reshape(-1, 10)
-            # print('batch_x shape = ' + str(batch_x.shape))
-            # print('batch_y shape = ' + str(batch_y.shape))
 
             result = sess.run(
                             fetches[:-2],
@@ -128,10 +99,10 @@ class SynchSGD:
               elapsed_time = time.time() - start_time
               start_time = time.time()
               print_str=''
-              print_str+="Time: "+ str(elapsed_time)+', '
-              print_str+="Batch: "+str(batch_count)+', '
+              print_str+="Time: " + str(elapsed_time)+ ', '
+              print_str+="Batch: " + str(batch_count)+ ', '
               if 'cost' in fetches_format:
-		            print_str+="Cost: "+str(result[fetches_format['cost']])+", "
+		        print_str += "Cost: " + str(result[fetches_format['cost']]) + ", "
               print (print_str)
 
           if 'accuracy' in fetches_format:
@@ -139,14 +110,6 @@ class SynchSGD:
 
         print ("Total Time: " +str(time.time()-begin_time))
       sv.stop()
-  # def enqueue_many(self,sess,queue,batch_size,num_enqueue, dataset):
-  #   batch_x,batch_y=dataset.next_batch(batch_size*num_enqueue)
-  #   batch_x=batch_x.reshape([num_enqueue,batch_size]+batch_x.shape[1:])
-  #   batch_y=batch_y.reshape([num_enqueue,batch_size]+batch_y.shape[1:])
-  #   feed_dict={self.inputs[0]:batch_x,self.inputs[1],batch_y}
-  #   sess.run(queue,feed_dict=feed_dict)
-  # def dequeue(self,sess,dequeue):
-  #   return sess.run(dequeue)
 
 def main(argv=None):
   # cluster specification
@@ -207,9 +170,6 @@ def main(argv=None):
                                           use_locking=True
                                           )
       train_op = rep_op.minimize(cross_entropy, global_step=global_step)
-
-      # train_op = grad_op.minimize(cross_entropy, global_step=global_step)
-
 
     init_token_op = rep_op.get_init_tokens_op()
     chief_queue_runner = rep_op.get_chief_queue_runner()

@@ -16,7 +16,7 @@ from protobuf.socketrpc import RpcService
 
 # input flags
 tf.app.flags.DEFINE_string("job_name", "", "Either 'ps' or 'worker'")
-tf.app.flags.DEFINE_integer("frequency",10,"frequency of pushing gradients")
+tf.app.flags.DEFINE_integer("frequency", 10,"frequency of pushing gradients")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
 FLAGS = tf.app.flags.FLAGS
 
@@ -24,9 +24,9 @@ FLAGS = tf.app.flags.FLAGS
 
 class AsynchSGD:
 
-  def __init__(self,parameter_servers,workers ):
-    self.parameter_servers=parameter_servers
-    self.workers=workers
+  def __init__(self, parameter_servers, workers):
+    self.parameter_servers = parameter_servers
+    self.workers = workers
     self.cluster = tf.train.ClusterSpec({"ps":parameter_servers, "worker":workers})
     # start a server for a specific task
     self.server = tf.train.Server(self.cluster,
@@ -57,17 +57,8 @@ class AsynchSGD:
                                     trainable = False)
         self.inputs,fetches=fetches(learning_rate,global_step)
         init_op = tf.initialize_all_variables()
-        # capacity=max(FLAGS.frequency,2)*len(self.workers)
-        # min_after_dequeue=2*len(self.workers)
-        # dtypes=[tf.float32,tf.float32]
-        # shared_name='train_queue'
-        # shared_test_name='test_queue'
-        # train_queue=tf.RandomShuffleQueue(capacity,min_after_dequeue,dtypes,shared_name=shared_name)
-        # # if FLAGS.task_index==0:
-        # #   train_enqueue_op=train_queue.enqueue_many(inputs)
-        # train_dequeue_op=train_queue.dequeue()
-
         print(str(FLAGS.task_index) + " Initialized Vars")
+
       sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
                                 global_step=global_step,
                                 init_op=init_op,
@@ -75,85 +66,57 @@ class AsynchSGD:
 
       begin_time = time.time()
       frequency = 100
-      print(str(FLAGS.task_index) + ' after sv declared, before sv prepare/wait block')
       with sv.prepare_or_wait_for_session(self.server.target) as sess:
-        '''
-        # is chief
-        if FLAGS.task_index == 0:
-          sv.start_queue_runners(sess, [chief_queue_runner])
-          sess.run(init_token_op)
-        '''
-        print('in sv prepare/wait block')
-
         if 'summary' in fetches_format:
           # create log writer object (this will log on every machine)
           writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
-
-        # if FLAGS.task_index==0:
-        #   print("initializing data queue")
-        #   self.enqueue_many(sess,train_enqueue_op,batch_size,capacity,dataset)
 
         # perform training cycles
         start_time = time.time()
         count = 0
         fetch_time=0
         for epoch in range(training_epochs):
-
           # number of batches in one epoch
           batch_count = int(500/batch_size)
-
           print(str(epoch))
           for i in range(batch_count):
-            # if FLAGS.task_index==0:
-            #   self.enqueue_many(sess,train_enqueue_op,batch_size,len(self.workers)*3,dataset)
-            # batch_x,batch_y=self.dequeue(sess,train_dequeue_op)
-            #batch_x, batch_y = dataset.next_batch(batch_size)
-
             # Make a synchronous call to the data server
             response=''
             try:
                 start_fetch_time=time.time()
-                #response = data_service_pb2.DataShardResponse(self.service.DataService(self.request, timeout=10000))
-                response = (self.service.DataService(self.request, timeout=10000))
-                fetch_time+= time.time()-start_fetch_time
+                response = self.service.DataService(self.request, timeout=10000)
+                fetch_time += time.time()-start_fetch_time
             except Exception, ex:
                 print('exception getting batch from data server')
                 print(ex)
-                count-=1
+                count -= 1
                 continue
-            batch_x, batch_y = np.fromstring(response.batchx,dtype=np.float32).reshape(-1, 784), np.fromstring(response.batchy).reshape(-1, 10)
+            batch_x, batch_y = np.fromstring(response.batchx, dtype=np.float32).reshape(-1, 784), np.fromstring(response.batchy).reshape(-1, 10)
 
             result = sess.run(
                             fetches,
                             feed_dict={self.inputs[0]: batch_x, self.inputs[1]: batch_y})
+
             if 'summary' in fetches_format:
               writer.add_summary(result[fetches_format['summary']], result[fetches_format['step']])
 
             count += 1
-            if count % frequency == 0 or i+1 == batch_count:
+            if count % frequency == 0 or i + 1 == batch_count:
               elapsed_time = time.time() - start_time
               start_time = time.time()
-              print_str=''
-              print_str+="Time: "+ str(elapsed_time)+', '
-              print_str+="Batch: "+str(batch_count)+', '
+              print_str = ''
+              print_str += "Time: "+ str(elapsed_time)+ ', '
+              print_str += "Batch: " + str(batch_count)+ ', '
               if 'cost' in fetches_format:
-		            print_str+="Cost: "+str(result[fetches_format['cost']])+", "
+		            print_str += "Cost: " + str(result[fetches_format['cost']]) + ", "
               print (print_str)
 
           if 'accuracy' in fetches_format:
-            print("Accuracy: "+str(result[fetches_format['accuracy']])+", ")
+            print("Accuracy: " + str(result[fetches_format['accuracy']])+ ", ")
 
-        print ("Total Time: " +str(time.time()-begin_time))
-        print ("Fetch Time:", str(fetch_time/float(time.time()-begin_time)))
+        print ("Total Time: " + str(time.time() - begin_time))
+        print ("Fetch Time:", str(fetch_time / float(time.time() - begin_time)))
       sv.stop()
-  # def enqueue_many(self,sess,queue,batch_size,num_enqueue, dataset):
-  #   batch_x,batch_y=dataset.next_batch(batch_size*num_enqueue)
-  #   batch_x=batch_x.reshape([num_enqueue,batch_size]+batch_x.shape[1:])
-  #   batch_y=batch_y.reshape([num_enqueue,batch_size]+batch_y.shape[1:])
-  #   feed_dict={self.inputs[0]:batch_x,self.inputs[1],batch_y}
-  #   sess.run(queue,feed_dict=feed_dict)
-  # def dequeue(self,sess,dequeue):
-  #   return sess.run(dequeue)
 
 def main(argv=None):
   # cluster specification
@@ -205,21 +168,7 @@ def main(argv=None):
     with tf.name_scope('train'):
       # optimizer is an "operation" which we can execute in a session
       grad_op = tf.train.GradientDescentOptimizer(learning_rate)
-      '''
-      rep_op = tf.train.SyncReplicasOptimizer(grad_op,
-                                          replicas_to_aggregate=len(workers),
-                                          replica_id=FLAGS.task_index,
-                                          total_num_replicas=len(workers),
-                                          use_locking=True
-                                          )
-      train_op = rep_op.minimize(cross_entropy, global_step=global_step)
-      '''
       train_op = grad_op.minimize(cross_entropy, global_step=global_step)
-
-    '''
-    init_token_op = rep_op.get_init_tokens_op()
-    chief_queue_runner = rep_op.get_chief_queue_runner()
-    '''
 
     with tf.name_scope('Accuracy'):
       # accuracy
